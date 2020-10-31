@@ -1,0 +1,327 @@
+<html>
+<head>
+    <title>Ebook Reader</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        html * 
+        {
+            padding: 0;
+            margin: 0;
+        }
+
+        body
+        {
+            font-family: sans-serif;
+            font-size: 16px;
+            line-height: 160%;
+            max-width: 1024px;
+            margin-left: auto;
+            margin-right: auto;
+            margin-top: 50px;
+            margin-bottom: 50px;
+        }
+
+        .box
+        {
+            border: solid 1px #000;
+        }
+
+        .row::after 
+        {
+            content: "";
+            clear: both;
+            display: block;
+        }
+
+        nav
+        {
+            float: left;
+            width: 100%;
+            background-color: #000;
+            padding-top: 20px;
+            padding-bottom: 20px;
+            position: sticky;
+            top: 0;
+            text-align-last: center;
+            margin-bottom: 20px;
+        }
+        
+        article
+        {
+            float: left;
+            width: 100%;
+        }
+
+        nav a 
+        {
+            text-align: center;
+            color: #fff;
+            text-decoration: none;
+            font-weight: bold;
+            margin-left: 20px;
+            margin-right: 20px;
+        }
+
+        nav a:hover 
+        {
+            color: #000;
+            background-color: #fff;
+        }
+
+        h1, h2 
+        {
+            letter-spacing: -2px;
+        }
+
+        h1, h2, p 
+        {
+            margin-bottom: 20px;
+            margin-left: 20px;
+            margin-right: 20px;
+            text-align: justify;
+        }
+
+        header 
+        {
+            margin-bottom: 20px;
+            text-align-last: center;
+        }
+
+        @media screen and (orientation:portrait) 
+        {
+            body
+            {
+                margin-top: 5px;
+            }
+
+            nav
+            {
+                width: 20%;
+                margin-bottom: 0px;
+            }
+
+            nav a
+            {
+                display: block;
+            }
+
+            article
+            {
+                width: 80%;
+            }
+        }
+    </style>
+    <script>
+        // We use this variable to keep track 10 chunks only
+        var chunks = {};
+        var loadedChunks = 0;
+        var maxChunkNumber, oldestChunkNumber, latestChunkNumber;
+        var navigationUI, contentUI;
+
+        // Action stores either PREVIOUS or NEXT
+        var lastNavigationAction = null; 
+
+        // Entry point of the program, we query the first 10 chunks
+        window.onload = function()
+        {
+            // Create a row for the header where to put in the geo-location
+            var headerUI = document.createElement("header");
+            headerUI.className = "row";
+            document.body.append(headerUI);
+
+            if(navigator.geolocation)
+            {
+                navigator.geolocation.getCurrentPosition(function(position) 
+                {
+                    headerUI.innerHTML = "<strong>Latitude: " + position.coords.latitude + ", Longitude: " + position.coords.longitude + "</strong>";
+                });
+            }
+            else
+            {
+                headerUI.innerHTML = "Cannot Gather the Location Information from the User";
+            }
+
+            // Create a row where to put 2 columns
+            var mainWrapperUI = document.createElement("div");
+            mainWrapperUI.className = "row";
+            
+            // Build the navigation to be placed in first column
+            // The second column is the content of the e-book
+            navigationUI = document.createElement("nav");
+            contentUI = document.createElement("article");
+
+            mainWrapperUI.appendChild(navigationUI);
+            mainWrapperUI.appendChild(contentUI);
+            document.body.appendChild(mainWrapperUI);
+
+            // Next, we need to know the number of chunks in total
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function()
+            {
+                if(this.readyState != 4 || this.status != 200)
+                    return;
+                
+                var response = JSON.parse(xhttp.responseText);
+                maxChunkNumber = parseInt(response["num"]) - 1;
+                
+                // Now that we got the total number of chunks we request the first 10 chunks only
+                var limit = 10;
+
+                if(maxChunkNumber < limit)
+                    limit = maxChunkNumber;
+
+                // Send the requests at the same time
+                for(var n = 0; n < limit; n++)
+                    loadChunk(n);
+            }
+
+            xhttp.open("GET", "http://tmaserv.scem.westernsydney.edu.au/chapters/", true);
+            xhttp.send();
+        }
+
+        // Load a chunk from the server
+        function loadChunk(n)
+        {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function()
+            {
+                if(this.readyState != 4 || this.status != 200)
+                    return;
+
+                // A chunk has been received, we create an object for it
+                var chunk = JSON.parse(xhttp.responseText);
+                loadedChunks++;
+                
+                chunks[n] = chunk;
+
+                if(loadedChunks >= 10 || loadedChunks >= maxChunkNumber)
+                    updatePage();
+            }
+
+            xhttp.open("GET", "http://tmaserv.scem.westernsydney.edu.au/chapters/?n=" + n, true);
+            xhttp.send();
+        }
+
+        // Return a list of sorted chunk numbers
+        function getSortedChunkNumbers()
+        {
+            // Get all chunk numbers
+            var chunkNumbers = Object.keys(chunks);
+
+            // Convert chunk numbers as integers and sort it
+            chunkNumbers = chunkNumbers.map(function(chunkNumber) { return parseInt(chunkNumber); });
+
+            for(var i = 0; i < chunkNumbers.length - 1; i++)
+            {
+                for(var j = i + 1; j < chunkNumbers.length; j++)
+                {
+                    if(chunkNumbers[i] > chunkNumbers[j])
+                    {
+                        var temp = chunkNumbers[i];
+                        chunkNumbers[i] = chunkNumbers[j];
+                        chunkNumbers[j] = temp;
+                    }
+                }
+            }
+
+            return chunkNumbers;
+        }
+
+        // This will load the next available chunk and remove the oldest chunk
+        function nextChunk()
+        {
+            // We can't move to the next chunk if we've reached the last chunk
+            if(latestChunkNumber >= maxChunkNumber)
+                return;
+
+            // Remove the oldest chunk
+            var chunkNumbers = getSortedChunkNumbers();
+            delete chunks[chunkNumbers[0]];
+            loadedChunks--;
+
+            // Get the next chunk for display
+            loadChunk(latestChunkNumber + 1);
+        }
+
+        // This will load the previous available chunk and remove the most recent chunk
+        function previousChunk()
+        {
+            // We can't move to a previous if we're already in the first
+            if(oldestChunkNumber <= 0)
+                return;
+
+            // Remove the most recent chunk
+            var chunkNumbers = getSortedChunkNumbers();
+            delete chunks[chunkNumbers[chunkNumbers.length - 1]];
+            loadedChunks--;
+
+            // Get the previous chunk for display
+            loadChunk(oldestChunkNumber - 1);
+        }
+
+        // Arrange or re-create the objects in the page based on chunks
+        function updatePage()
+        {
+            console.log("updatePage()");
+
+            // Get the chunk numbers, and sort it and add it to the navigation            
+            // Convert chunk numbers as integers and sort it
+            var chunkNumbers = getSortedChunkNumbers();
+
+            console.log(chunkNumbers);
+
+            oldestChunkNumber = chunkNumbers[0];
+            latestChunkNumber = chunkNumbers[chunkNumbers.length - 1];
+
+            // Clear the navigation and content, put in the chunks as URL and the contents of the chunk 
+            navigationUI.innerHTML = "";
+            contentUI.innerHTML = "";
+
+            // Create the "previous link" to allow moving to a previous chunk
+            var prevLinkUI = document.createElement("a");
+            prevLinkUI.appendChild(document.createTextNode("PREVIOUS"));
+            prevLinkUI.href = "javascript:void(0)";
+            prevLinkUI.onclick = previousChunk;
+            navigationUI.appendChild(prevLinkUI);
+
+            for(var i = 0; i < chunkNumbers.length; i++)
+            { 
+                var chunkNumber = chunkNumbers[i];
+
+                // Add a chunk link
+                var chunkLinkUI = document.createElement("a");
+                chunkLinkUI.appendChild(document.createTextNode(chunkNumber));
+                chunkLinkUI.href = "#chunk-" + chunkNumber;
+                navigationUI.appendChild(chunkLinkUI);
+
+                // Add in the chunk content
+                var chunk = chunks[chunkNumber];
+                var dataUI;
+
+                if(chunk["type"] == "bigheading")
+                    dataUI = document.createElement("h1");                
+                else if(chunk["type"] == "heading")
+                    dataUI = document.createElement("h2");
+                else if(chunk["type"] == "paragraph")
+                    dataUI = document.createElement("p");
+                
+                // Create a link that links the chunk number to the chunk data in the page so that when
+                // the user clicks on the chunk link, the page shows the related-chunk-data
+                var chunkLinkRefUI = document.createElement("a");
+                chunkLinkRefUI.name = "chunk-" + chunkNumber;
+                dataUI.appendChild(chunkLinkRefUI);
+                dataUI.appendChild(document.createTextNode(chunk["data"]));
+                contentUI.appendChild(dataUI);
+            }
+
+            // Create the "next link" to allow moving to next chunk
+            var nextLinkUI = document.createElement("a");
+            nextLinkUI.appendChild(document.createTextNode("NEXT"));
+            nextLinkUI.href = "javascript:void(0)";
+            nextLinkUI.onclick = nextChunk;
+            navigationUI.appendChild(nextLinkUI);
+        }
+    </script>    
+</head>
+<body></body>
+</html>
